@@ -165,7 +165,8 @@ function InterviewCanvas(props) {
   var impressionState = useState(""); var impression = impressionState[0]; var setImpression = impressionState[1];
   var recruteurState = useState(""); var recruteur = recruteurState[0]; var setRecruteur = recruteurState[1];
 
-  useEffect(function() {
+// eslint-disable-next-line react-hooks/exhaustive-deps
+useEffect(function() {
     if (!running) return;
     var interval = setInterval(function(){ setTimer(function(t){return t+1;}); }, 1000);
     return function(){ clearInterval(interval); };
