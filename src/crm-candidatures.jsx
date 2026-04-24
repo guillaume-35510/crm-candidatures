@@ -1,6 +1,69 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 const STRUCTURES_INIT = ["Toutes", "TechCorp Paris", "InnoGroup Lyon", "StartupNord", "Groupe Medical Est"];
+
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+const DRIVE_FILE_NAME = "crm-recrutement-data.json";
+
+// ── GOOGLE DRIVE API ─────────────────────────────────────────
+
+function loadGapiScript() {
+  return new Promise(function(resolve) {
+    if (window.gapi) { window.gapi.load("client", resolve); return; }
+    var script = document.createElement("script");
+    script.src = "https://apis.google.com/js/api.js";
+    script.onload = function() { window.gapi.load("client", resolve); };
+    document.head.appendChild(script);
+  });
+}
+
+function loadGsiScript() {
+  return new Promise(function(resolve) {
+    if (window.google && window.google.accounts) { resolve(); return; }
+    var script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.onload = resolve;
+    document.head.appendChild(script);
+  });
+}
+
+async function findDriveFile(token) {
+  var res = await fetch(
+    "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27" + DRIVE_FILE_NAME + "%27&fields=files(id,name)",
+    { headers: { "Authorization": "Bearer " + token } }
+  );
+  var data = await res.json();
+  return (data.files && data.files.length > 0) ? data.files[0].id : null;
+}
+
+async function readDriveFile(token, fileId) {
+  var res = await fetch(
+    "https://www.googleapis.com/drive/v3/files/" + fileId + "?alt=media",
+    { headers: { "Authorization": "Bearer " + token } }
+  );
+  return await res.json();
+}
+
+async function saveDriveFile(token, fileId, data) {
+  var body = JSON.stringify(data);
+  if (fileId) {
+    await fetch("https://www.googleapis.com/upload/drive/v3/files/" + fileId + "?uploadType=media", {
+      method: "PATCH",
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+      body: body
+    });
+  } else {
+    var boundary = "crm_boundary_001";
+    var meta = JSON.stringify({ name: DRIVE_FILE_NAME, parents: ["appDataFolder"] });
+    var multipart = "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n--" + boundary + "\r\nContent-Type: application/json\r\n\r\n" + body + "\r\n--" + boundary + "--";
+    var res2 = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "multipart/related; boundary=" + boundary },
+      body: multipart
+    });
+    return await res2.json();
+  }
+}
 
 const CONTACT_TYPES = {
   email: { label: "Email", color: "#3B82F6" },
@@ -79,6 +142,58 @@ function loadFromStorage(key, fallback) {
 }
 function saveToStorage(key, value) {
   try { localStorage.setItem(key,JSON.stringify(value)); } catch(e) {}
+}
+
+// ── MIGRATION DES DONNEES ─────────────────────────────────────
+// Cette fonction corrige les donnees existantes sans les effacer
+function migrateCandidate(c) {
+  // Corriger experience : tableau d'objets -> texte lisible
+  var exp = c.experience;
+  if (Array.isArray(exp)) {
+    exp = exp.map(function(e) {
+      if (typeof e === "string") return e;
+      var parts = [];
+      if (e.poste) parts.push(e.poste);
+      if (e.entreprise) parts.push(e.entreprise);
+      if (e.lieu) parts.push(e.lieu);
+      if (e.periode) parts.push(e.periode);
+      if (e.description) parts.push(e.description);
+      if (e.missions && Array.isArray(e.missions)) parts.push(e.missions.join(", "));
+      return parts.join(" — ");
+    }).join("\n");
+  }
+  // Corriger competences : tableau d'objets -> tableau de strings
+  var comp = c.competences;
+  if (Array.isArray(comp)) {
+    comp = comp.map(function(item) {
+      if (typeof item === "string") return item;
+      return item.label || item.nom || JSON.stringify(item);
+    });
+  }
+  // Garantir que tous les champs obligatoires existent
+  return Object.assign({
+    contacts: [],
+    notes: "",
+    structures: [],
+    status: "nouveau",
+    createdAt: new Date().toISOString(),
+    lastContactDate: null,
+    cvData: null,
+  }, c, {
+    experience: exp || "",
+    competences: comp || [],
+  });
+}
+
+function loadAndMigrateCandidates(fallback) {
+  try {
+    var raw = localStorage.getItem("crm_candidates");
+    if (raw) {
+      var data = JSON.parse(raw);
+      return data.map(migrateCandidate);
+    }
+  } catch(e) {}
+  return fallback;
 }
 
 async function extractCVData(base64PDF) {
@@ -720,12 +835,18 @@ var SAMPLE_DATA = [
 ];
 
 export default function CRMApp() {
-  var candidatesState=useState(function(){return loadFromStorage("crm_candidates",SAMPLE_DATA);});
+  var candidatesState=useState(function(){return loadAndMigrateCandidates(SAMPLE_DATA);});
   var candidates=candidatesState[0]; var setCandidates=candidatesState[1];
   var archivesState=useState(function(){return loadFromStorage("crm_archives",[]);});
   var archives=archivesState[0]; var setArchives=archivesState[1];
   var structuresState=useState(function(){return loadFromStorage("crm_structures",STRUCTURES_INIT);});
   var structures=structuresState[0]; var setStructures=structuresState[1];
+
+  // Google Drive state
+  var gTokenState=useState(loadFromStorage("crm_gtoken",null)); var gToken=gTokenState[0]; var setGToken=gTokenState[1];
+  var gFileIdState=useState(loadFromStorage("crm_gfileid",null)); var gFileId=gFileIdState[0]; var setGFileId=gFileIdState[1];
+  var gStatusState=useState("idle"); var gStatus=gStatusState[0]; var setGStatus=gStatusState[1];
+  var gSyncTimerState=useState(null); var gSyncTimer=gSyncTimerState[0]; var setGSyncTimer=gSyncTimerState[1];
 
   var selectedState=useState(null); var selected=selectedState[0]; var setSelected=selectedState[1];
   var showAddState=useState(false); var showAdd=showAddState[0]; var setShowAdd=showAddState[1];
@@ -740,9 +861,68 @@ export default function CRMApp() {
   var confirmBulkState=useState(null); var confirmBulk=confirmBulkState[0]; var setConfirmBulk=confirmBulkState[1];
   var showBulkStatusState=useState(false); var showBulkStatus=showBulkStatusState[0]; var setShowBulkStatus=showBulkStatusState[1];
 
+  // Sauvegarde localStorage
   useEffect(function(){saveToStorage("crm_candidates",candidates);},[candidates]);
   useEffect(function(){saveToStorage("crm_archives",archives);},[archives]);
   useEffect(function(){saveToStorage("crm_structures",structures);},[structures]);
+  useEffect(function(){saveToStorage("crm_gtoken",gToken);},[gToken]);
+  useEffect(function(){saveToStorage("crm_gfileid",gFileId);},[gFileId]);
+
+  // Sync Drive avec debounce 3s
+  var syncToDrive = useCallback(function(token, fileId, data) {
+    if (!token) return;
+    setGStatus("saving");
+    saveDriveFile(token, fileId, data).then(function(res) {
+      if (res && res.id && !fileId) { setGFileId(res.id); saveToStorage("crm_gfileid", res.id); }
+      setGStatus("saved");
+      setTimeout(function(){ setGStatus("connected"); }, 2000);
+    }).catch(function() { setGStatus("error"); });
+  }, []);
+
+  useEffect(function() {
+    if (!gToken) return;
+    if (gSyncTimer) clearTimeout(gSyncTimer);
+    var timer = setTimeout(function() {
+      syncToDrive(gToken, gFileId, { candidates: candidates, archives: archives, structures: structures });
+    }, 3000);
+    setGSyncTimer(timer);
+    return function(){ clearTimeout(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates, archives, structures, gToken]);
+
+  // Connexion Google
+  function connectGoogle() {
+    loadGsiScript().then(function() {
+      var client = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/drive.appdata",
+        callback: function(resp) {
+          if (resp.error) { setGStatus("error"); return; }
+          setGToken(resp.access_token);
+          setGStatus("loading");
+          findDriveFile(resp.access_token).then(function(fid) {
+            if (fid) {
+              setGFileId(fid);
+              return readDriveFile(resp.access_token, fid).then(function(data) {
+                if (data.candidates) setCandidates(data.candidates.map(migrateCandidate));
+                if (data.archives) setArchives(data.archives);
+                if (data.structures) setStructures(data.structures);
+                setGStatus("connected");
+              });
+            } else {
+              setGStatus("connected");
+            }
+          }).catch(function(){ setGStatus("error"); });
+        }
+      });
+      client.requestAccessToken();
+    });
+  }
+
+  function disconnectGoogle() {
+    setGToken(null); setGFileId(null); setGStatus("idle");
+    saveToStorage("crm_gtoken", null); saveToStorage("crm_gfileid", null);
+  }
 
   var filtered=candidates.filter(function(c){
     var ms=!search||(c.prenom+" "+c.nom+" "+(c.poste||"")).toLowerCase().indexOf(search.toLowerCase())>=0;
@@ -787,6 +967,41 @@ export default function CRMApp() {
           <div style={{padding:"0 20px 20px",borderBottom:"1px solid #1e293b"}}>
             <div style={{fontWeight:800,fontSize:17,color:"#fff"}}>Recrutement</div>
             <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{candidates.length} candidats actifs · {archives.length} archives</div>
+            <div style={{marginTop:10}}>
+              {gStatus==="idle" && (
+                <button onClick={connectGoogle} style={{width:"100%",background:"#fff",color:"#0f172a",border:"none",cursor:"pointer",borderRadius:8,padding:"7px 10px",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:6,justifyContent:"center"}}>
+                  <span style={{fontSize:14}}>G</span> Connecter Google Drive
+                </button>
+              )}
+              {gStatus==="loading" && <div style={{fontSize:12,color:"#64748b",textAlign:"center",padding:"6px 0"}}>Chargement Drive...</div>}
+              {gStatus==="connected" && (
+                <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"space-between"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:"#10B981",flexShrink:0}} />
+                    <span style={{fontSize:11,color:"#10B981",fontWeight:600}}>Drive connecte</span>
+                  </div>
+                  <button onClick={disconnectGoogle} style={{background:"none",border:"none",cursor:"pointer",color:"#475569",fontSize:11,padding:"2px 6px"}}>Deconnecter</button>
+                </div>
+              )}
+              {gStatus==="saving" && (
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:"#F59E0B",flexShrink:0}} />
+                  <span style={{fontSize:11,color:"#F59E0B",fontWeight:600}}>Sauvegarde...</span>
+                </div>
+              )}
+              {gStatus==="saved" && (
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:"#10B981",flexShrink:0}} />
+                  <span style={{fontSize:11,color:"#10B981",fontWeight:600}}>Sauvegarde OK</span>
+                </div>
+              )}
+              {gStatus==="error" && (
+                <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"space-between"}}>
+                  <span style={{fontSize:11,color:"#EF4444",fontWeight:600}}>Erreur Drive</span>
+                  <button onClick={connectGoogle} style={{background:"none",border:"none",cursor:"pointer",color:"#EF4444",fontSize:11,padding:"2px 6px"}}>Reconnecter</button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Vue */}
