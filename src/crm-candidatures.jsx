@@ -162,6 +162,20 @@ function migrateCandidate(c) {
       return parts.join(" — ");
     }).join("\n");
   }
+  // Corriger formation : tableau d'objets -> texte lisible
+  var form = c.formation;
+  if (Array.isArray(form)) {
+    form = form.map(function(f) {
+      if (typeof f === "string") return f;
+      var parts = [];
+      if (f.diplome) parts.push(f.diplome);
+      if (f.titre) parts.push(f.titre);
+      if (f.etablissement) parts.push(f.etablissement);
+      if (f.annee) parts.push(f.annee);
+      if (f.description) parts.push(f.description);
+      return parts.join(" — ");
+    }).join("\n");
+  }
   // Corriger competences : tableau d'objets -> tableau de strings
   var comp = c.competences;
   if (Array.isArray(comp)) {
@@ -170,17 +184,12 @@ function migrateCandidate(c) {
       return item.label || item.nom || JSON.stringify(item);
     });
   }
-  // Garantir que tous les champs obligatoires existent
   return Object.assign({
-    contacts: [],
-    notes: "",
-    structures: [],
-    status: "nouveau",
-    createdAt: new Date().toISOString(),
-    lastContactDate: null,
-    cvData: null,
+    contacts: [], notes: "", structures: [], status: "nouveau",
+    createdAt: new Date().toISOString(), lastContactDate: null, cvData: null,
   }, c, {
     experience: exp || "",
+    formation: form || "",
     competences: comp || [],
   });
 }
@@ -637,7 +646,27 @@ function CandidateDetail(props) {
                 )}
               </div>
             )}
-            {candidate.formation && <div><div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:6}}>FORMATION</div><p style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{candidate.formation}</p></div>}
+            {candidate.formation && (
+              <div>
+                <div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:6}}>FORMATION</div>
+                {Array.isArray(candidate.formation) ? (
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {candidate.formation.map(function(f,i){
+                      if (typeof f === "string") return <p key={i} style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{f}</p>;
+                      return (
+                        <div key={i} style={{background:"#f8fafc",borderRadius:8,padding:"8px 12px"}}>
+                          <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{f.diplome||f.titre||f.nom||""}{f.etablissement?" — "+f.etablissement:""}</div>
+                          {f.annee&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{f.annee}</div>}
+                          {f.description&&<div style={{fontSize:12,color:"#64748b",marginTop:4,lineHeight:1.5}}>{f.description}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{candidate.formation}</p>
+                )}
+              </div>
+            )}
             {candidate.competences&&candidate.competences.length>0 && (
               <div><div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:8}}>COMPETENCES</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{candidate.competences.map(function(c,i){var label=typeof c==="string"?c:(c.label||c.nom||JSON.stringify(c));return <span key={i} style={{background:"#eff6ff",color:"#1d4ed8",borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:500}}>{label}</span>;})}</div>
