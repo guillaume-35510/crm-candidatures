@@ -165,13 +165,11 @@ function InterviewCanvas(props) {
   var impressionState = useState(""); var impression = impressionState[0]; var setImpression = impressionState[1];
   var recruteurState = useState(""); var recruteur = recruteurState[0]; var setRecruteur = recruteurState[1];
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(function() {
     if (!running) return;
     var interval = setInterval(function(){ setTimer(function(t){return t+1;}); }, 1000);
     return function(){ clearInterval(interval); };
   }, [running]);
-
 
   function formatTimer(s) {
     var m = Math.floor(s/60); var sec = s%60;
@@ -640,10 +638,10 @@ function AddCandidateForm(props) {
 // ── CARTE CANDIDAT ───────────────────────────────────────────
 
 function CandidateCard(props) {
-  var candidate=props.candidate; var onClick=props.onClick;
+  var candidate=props.candidate; var onClick=props.onClick; var selected=props.selected;
   var lastContact=candidate.contacts&&candidate.contacts[0];
   return (
-    <div onClick={onClick} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:14,padding:"16px 18px",cursor:"pointer",display:"flex",flexDirection:"column",gap:8}}>
+    <div onClick={onClick} style={{background:selected?"#eff6ff":"#fff",border:"1px solid "+(selected?"#3B82F6":"#f1f5f9"),borderRadius:14,padding:"16px 18px",cursor:"pointer",display:"flex",flexDirection:"column",gap:8,transition:"all 0.15s"}}>
       <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
         <Avatar name={candidate.prenom+" "+candidate.nom} size={42} />
         <div style={{flex:1,minWidth:0}}>
@@ -717,6 +715,9 @@ export default function CRMApp() {
   var newStructureState=useState(""); var newStructure=newStructureState[0]; var setNewStructure=newStructureState[1];
   var showStructureInputState=useState(false); var showStructureInput=showStructureInputState[0]; var setShowStructureInput=showStructureInputState[1];
   var viewState=useState("actifs"); var view=viewState[0]; var setView=viewState[1];
+  var selectionState=useState([]); var selection=selectionState[0]; var setSelection=selectionState[1];
+  var confirmBulkState=useState(null); var confirmBulk=confirmBulkState[0]; var setConfirmBulk=confirmBulkState[1];
+  var showBulkStatusState=useState(false); var showBulkStatus=showBulkStatusState[0]; var setShowBulkStatus=showBulkStatusState[1];
 
   useEffect(function(){saveToStorage("crm_candidates",candidates);},[candidates]);
   useEffect(function(){saveToStorage("crm_archives",archives);},[archives]);
@@ -736,6 +737,22 @@ export default function CRMApp() {
   function restoreCandidate(c){setArchives(function(prev){return prev.filter(function(x){return x.id!==c.id;});});setCandidates(function(prev){return [c].concat(prev);});}
   function deleteCandidate(c){setCandidates(function(prev){return prev.filter(function(x){return x.id!==c.id;});});setArchives(function(prev){return prev.filter(function(x){return x.id!==c.id;});});}
   function removeStructure(s){setStructures(function(prev){return prev.filter(function(x){return x!==s;});});if(filterStructure===s)setFilterStructure("Toutes");}
+
+  function toggleSelect(id){setSelection(function(prev){return prev.includes(id)?prev.filter(function(x){return x!==id;}):prev.concat([id]);});}
+  function selectAll(){setSelection(filtered.map(function(c){return c.id;}));}
+  function clearSelection(){setSelection([]);}
+  function bulkArchive(){
+    selection.forEach(function(id){var c=candidates.find(function(x){return x.id===id;});if(c)archiveCandidate(c);});
+    setSelection([]);setConfirmBulk(null);
+  }
+  function bulkDelete(){
+    selection.forEach(function(id){deleteCandidate({id:id});});
+    setSelection([]);setConfirmBulk(null);
+  }
+  function bulkSetStatus(status){
+    setCandidates(function(prev){return prev.map(function(c){return selection.includes(c.id)?Object.assign({},c,{status:status}):c;});});
+    setSelection([]);setShowBulkStatus(false);
+  }
 
   var counts={};Object.keys(STATUS_CONFIG).forEach(function(k){counts[k]=candidates.filter(function(c){return c.status===k;}).length;});
   var etapeCounts={};Object.keys(ETAPE_TAGS).forEach(function(k){etapeCounts[k]=candidates.filter(function(c){return(c.contacts||[]).some(function(ct){return ct.etape===k;});}).length;});
@@ -801,10 +818,48 @@ export default function CRMApp() {
           <ArchiveSection archives={archives} onRestore={restoreCandidate} onDelete={deleteCandidate} />
         ) : (
           <div style={{flex:1,padding:28,minWidth:0}}>
-            <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:24}}>
+            <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16}}>
               <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Rechercher un candidat..." style={{flex:1,borderRadius:10,border:"1px solid #e2e8f0",padding:"10px 16px",fontSize:14,background:"#fff",outline:"none"}} />
               <button onClick={function(){setShowAdd(true);}} style={{background:"#0f172a",color:"#fff",border:"none",cursor:"pointer",borderRadius:10,padding:"10px 20px",fontWeight:700,fontSize:14,whiteSpace:"nowrap"}}>+ Nouveau candidat</button>
             </div>
+
+            {/* BARRE SELECTION MULTIPLE */}
+            {selection.length>0 ? (
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:16,background:"#0f172a",borderRadius:12,padding:"10px 16px",flexWrap:"wrap"}}>
+                <span style={{color:"#fff",fontWeight:700,fontSize:14,marginRight:4}}>{selection.length} selectionne{selection.length>1?"s":""}</span>
+                <div style={{flex:1,display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <div style={{position:"relative"}}>
+                    <button onClick={function(){setShowBulkStatus(!showBulkStatus);}} style={{background:"#1e293b",color:"#fff",border:"1px solid #334155",cursor:"pointer",borderRadius:8,padding:"6px 14px",fontWeight:600,fontSize:12}}>
+                      Changer statut
+                    </button>
+                    {showBulkStatus&&(
+                      <div style={{position:"absolute",top:"100%",left:0,marginTop:4,background:"#fff",borderRadius:10,boxShadow:"0 10px 30px rgba(0,0,0,0.15)",zIndex:100,padding:8,minWidth:160}}>
+                        {Object.entries(STATUS_CONFIG).map(function(entry){var key=entry[0];var cfg=entry[1];return(
+                          <button key={key} onClick={function(){bulkSetStatus(key);}} style={{display:"block",width:"100%",padding:"7px 12px",borderRadius:6,border:"none",cursor:"pointer",background:"#fff",color:cfg.color,fontWeight:600,fontSize:13,textAlign:"left"}}>
+                            {cfg.label}
+                          </button>
+                        );})}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={function(){setConfirmBulk({title:"Archiver "+selection.length+" candidat(s) ?",message:"Ils seront deplaces dans les archives.",confirmLabel:"Archiver",danger:false,action:bulkArchive});}} style={{background:"#334155",color:"#fff",border:"none",cursor:"pointer",borderRadius:8,padding:"6px 14px",fontWeight:600,fontSize:12}}>
+                    Archiver
+                  </button>
+                  <button onClick={function(){setConfirmBulk({title:"Supprimer "+selection.length+" candidat(s) ?",message:"Cette action est irreversible.",confirmLabel:"Supprimer",danger:true,action:bulkDelete});}} style={{background:"#ef4444",color:"#fff",border:"none",cursor:"pointer",borderRadius:8,padding:"6px 14px",fontWeight:600,fontSize:12}}>
+                    Supprimer
+                  </button>
+                </div>
+                <button onClick={clearSelection} style={{background:"none",color:"#94a3b8",border:"none",cursor:"pointer",fontSize:18,padding:"0 4px"}}>x</button>
+              </div>
+            ):(
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:16}}>
+                <button onClick={selectAll} style={{background:"#f1f5f9",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",borderRadius:8,padding:"5px 14px",fontWeight:600,fontSize:12}}>
+                  Tout selectionner ({filtered.length})
+                </button>
+              </div>
+            )}
+
+            {confirmBulk&&<ConfirmDialog title={confirmBulk.title} message={confirmBulk.message} confirmLabel={confirmBulk.confirmLabel} danger={confirmBulk.danger} onCancel={function(){setConfirmBulk(null);}} onConfirm={confirmBulk.action} />}
 
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10,marginBottom:16}}>
               {["nouveau","contacte","entretien","offre","retenu"].map(function(k){var cfg=STATUS_CONFIG[k];return(
@@ -827,7 +882,17 @@ export default function CRMApp() {
               <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}><p style={{fontSize:16,fontWeight:500}}>Aucun candidat trouve</p></div>
             ):(
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
-                {filtered.map(function(c){return <CandidateCard key={c.id} candidate={c} onClick={function(){setSelected(c);}} />;}) }
+                {filtered.map(function(c){
+                  var isSelected=selection.includes(c.id);
+                  return (
+                    <div key={c.id} style={{position:"relative"}}>
+                      <div onClick={function(e){e.stopPropagation();toggleSelect(c.id);}} style={{position:"absolute",top:12,right:12,zIndex:10,width:20,height:20,borderRadius:6,border:"2px solid "+(isSelected?"#0f172a":"#cbd5e1"),background:isSelected?"#0f172a":"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {isSelected&&<span style={{color:"#fff",fontSize:12,fontWeight:700,lineHeight:1}}>✓</span>}
+                      </div>
+                      <CandidateCard candidate={c} onClick={function(){if(selection.length>0){toggleSelect(c.id);}else{setSelected(c);}}} selected={isSelected} />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
