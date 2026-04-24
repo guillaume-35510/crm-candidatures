@@ -500,11 +500,32 @@ function CandidateDetail(props) {
               })}
             </div>
             {candidate.resume && <div style={{background:"#fffbeb",borderRadius:10,padding:14,borderLeft:"3px solid #F59E0B"}}><div style={{fontSize:11,fontWeight:600,color:"#92400E",marginBottom:4}}>RESUME DU PROFIL</div><p style={{margin:0,fontSize:13,color:"#451a03",lineHeight:1.6}}>{candidate.resume}</p></div>}
-            {candidate.experience && <div><div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:6}}>EXPERIENCE</div><p style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{candidate.experience}</p></div>}
+            {candidate.experience && (
+              <div>
+                <div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:6}}>EXPERIENCE</div>
+                {Array.isArray(candidate.experience) ? (
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {candidate.experience.map(function(exp,i){
+                      if (typeof exp === "string") return <p key={i} style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{exp}</p>;
+                      return (
+                        <div key={i} style={{background:"#f8fafc",borderRadius:8,padding:"8px 12px"}}>
+                          <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{exp.poste}{exp.entreprise?" — "+exp.entreprise:""}</div>
+                          {exp.periode&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{exp.periode}{exp.lieu?" · "+exp.lieu:""}</div>}
+                          {exp.description&&<div style={{fontSize:12,color:"#64748b",marginTop:4,lineHeight:1.5}}>{exp.description}</div>}
+                          {exp.missions&&Array.isArray(exp.missions)&&<div style={{fontSize:12,color:"#64748b",marginTop:4}}>{exp.missions.join(" · ")}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{candidate.experience}</p>
+                )}
+              </div>
+            )}
             {candidate.formation && <div><div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:6}}>FORMATION</div><p style={{margin:0,fontSize:13,color:"#374151",lineHeight:1.6}}>{candidate.formation}</p></div>}
             {candidate.competences&&candidate.competences.length>0 && (
               <div><div style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginBottom:8}}>COMPETENCES</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{candidate.competences.map(function(c,i){return <span key={i} style={{background:"#eff6ff",color:"#1d4ed8",borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:500}}>{c}</span>;})}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{candidate.competences.map(function(c,i){var label=typeof c==="string"?c:(c.label||c.nom||JSON.stringify(c));return <span key={i} style={{background:"#eff6ff",color:"#1d4ed8",borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:500}}>{label}</span>;})}</div>
               </div>
             )}
             {!isArchived && (
@@ -886,10 +907,10 @@ export default function CRMApp() {
                   var isSelected=selection.includes(c.id);
                   return (
                     <div key={c.id} style={{position:"relative"}}>
-                      <div onClick={function(e){e.stopPropagation();toggleSelect(c.id);}} style={{position:"absolute",top:12,right:12,zIndex:10,width:20,height:20,borderRadius:6,border:"2px solid "+(isSelected?"#0f172a":"#cbd5e1"),background:isSelected?"#0f172a":"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        <div onClick={function(e){e.stopPropagation();toggleSelect(c.id);}} style={{position:"absolute",top:12,right:12,zIndex:10,width:20,height:20,borderRadius:6,border:"2px solid "+(isSelected?"#0f172a":"#cbd5e1"),background:isSelected?"#0f172a":"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
                         {isSelected&&<span style={{color:"#fff",fontSize:12,fontWeight:700,lineHeight:1}}>✓</span>}
                       </div>
-                      <CandidateCard candidate={c} onClick={function(){if(selection.length>0){toggleSelect(c.id);}else{setSelected(c);}}} selected={isSelected} />
+                      <CandidateCard candidate={c} onClick={function(){setSelected(c);}} selected={isSelected} />
                     </div>
                   );
                 })}
